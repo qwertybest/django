@@ -92,7 +92,6 @@ class ProductViewSet(ModelViewSet):
 
 class ShopIndexView(View):
 
-    @method_decorator(cache_page(60 * 2, key_prefix="shop-index-key-prefix"))
     def get(self, request: HttpRequest) -> HttpResponse:
         products = [
             ('Laptop', 1999),

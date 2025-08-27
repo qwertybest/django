@@ -1,28 +1,22 @@
-from csv import DictWriter
+import logging
+
 from timeit import default_timer
 
 from django.http import HttpResponse, HttpRequest, HttpResponseRedirect, JsonResponse
 from django.shortcuts import render, reverse
 from django.urls import reverse_lazy
-from django.utils.decorators import method_decorator
 from django.views import View
 from django.views.generic import ListView, DetailView, CreateView, UpdateView, DeleteView
 from django.contrib.auth.mixins import LoginRequiredMixin, PermissionRequiredMixin
-from django.views.decorators.cache import cache_page
-from django.core.cache import cache
-
-from rest_framework.parsers import MultiPartParser
-from rest_framework.request import Request
-from rest_framework.response import Response
 from rest_framework.filters import SearchFilter, OrderingFilter
 from rest_framework.viewsets import ModelViewSet
-from rest_framework.decorators import action
 from django_filters.rest_framework import DjangoFilterBackend
 
-from .common import save_csv_products
 from .forms import ProductForm
 from .models import Product, Order, ProductImage
 from .serializers import ProductSerializer
+
+log = logging.getLogger(__name__)
 
 
 class ProductViewSet(ModelViewSet):
@@ -47,51 +41,8 @@ class ProductViewSet(ModelViewSet):
         "discount",
     ]
 
-    @method_decorator(cache_page(60 * 2))
-    def list(self, *args, **kwargs):
-        print("list")
-        return super().list(*args, **kwargs)
-
-    @action(methods=["get"], detail=False)
-    def download_csv(self, request: Request):
-        response = HttpResponse(content_type="text/csv")
-        filename = "products-export.csv"
-        response["Content-Disposition"] = f"attachment; filename={filename}"
-        queryset = self.filter_queryset(self.get_queryset())
-        fields = [
-            "name",
-            "description",
-            "price",
-            "discount",
-        ]
-        queryset = queryset.only(*fields)
-        writer = DictWriter(response, fieldnames=fields)
-        writer.writeheader()
-
-        for product in queryset:
-            writer.writerow({
-                field: getattr(product, field)
-                for field in fields
-            })
-
-        return response
-
-    @action(
-        detail=False,
-        methods=["post"],
-        parser_classes=[MultiPartParser],
-    )
-    def upload_csv(self, request: Request):
-        products = save_csv_products(
-            request.FILES["file"].file,
-            encoding=request.encoding,
-        )
-        serializer = self.get_serializer(products, many=True)
-        return Response(serializer.data)
-
 
 class ShopIndexView(View):
-
     def get(self, request: HttpRequest) -> HttpResponse:
         products = [
             ('Laptop', 1999),
@@ -102,7 +53,8 @@ class ShopIndexView(View):
             "time_running": default_timer(),
             "products": products,
         }
-        # print("shop index context", context)
+        log.debug("Products for shop index: %s", products)
+        log.info("Rendering shop index")
         return render(request, 'shopapp/shop-index.html', context=context)
 
 
@@ -178,22 +130,14 @@ class OrderDetailView(PermissionRequiredMixin, DetailView):
 
 class ProductsDataExportView(View):
     def get(self, request: HttpRequest) -> JsonResponse:
-        cache_key = "products_data_export"
-        # Check if the data already exists in the cache
-        products_data = cache.get(cache_key)
-
-        # If the data is not already cached, generate it and cache it
-        if products_data is None:
-            products = Product.objects.order_by('pk').all()
-            products_data = [
-                {
-                    "pk": product.pk,
-                    "name": product.name,
-                    "price": product.price,
-                    "archived": product.archived,
-                }
-                for product in products
-            ]
-            cache.set(cache_key, products_data, 300)
-
+        products = Product.objects.order_by('pk').all()
+        products_data = [
+            {
+                "pk": product.pk,
+                "name": product.name,
+                "price": product.price,
+                "archived": product.archived,
+            }
+            for product in products
+        ]
         return JsonResponse({"products": products_data})
